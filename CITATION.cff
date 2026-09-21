@@ -1,0 +1,21 @@
+cff-version: 1.2.0
+title: "Pdf Rename"
+message: "If this tool helped your work, please cite it."
+type: software
+authors:
+  - given-names: "A K M Ahasun"
+    family-names: "Habib"
+    affiliation: "M3D Lab, Department of Mechanical Engineering, Texas Tech University"
+abstract: >-
+  A Windows desktop tool that renames downloaded research papers to
+  YYYY_Title.pdf using bibliographic records resolved from the DOI printed in
+  the PDF, verified against the document text before any file is renamed.
+keywords:
+  - bibliography
+  - reference-management
+  - crossref
+  - doi
+  - pdf
+license: MIT
+version: "3.0"
+date-released: "2026-09-21"
