@@ -172,14 +172,14 @@ def clean_biblio_text(text: str) -> str:
     return text
 
 
-def sanitize(text: str, budget: int) -> str:
+def sanitize(text: str, budget: int, ceiling: int = TITLE_CEILING) -> str:
     """Make a fragment safe for a Windows filename, within a length budget."""
     if not text:
         return ""
     text = text.replace(":", " -").replace("/", "-").replace("\\", "-")
     text = INVALID_RE.sub("", text)
     text = WS_RE.sub(" ", text).strip().rstrip(". ")
-    limit = max(20, min(TITLE_CEILING, budget))
+    limit = max(20, min(ceiling, budget))
     if len(text) > limit:
         text = text[:limit].rsplit(" ", 1)[0].rstrip(". ,")
     return text
@@ -824,21 +824,30 @@ def run_folder(folder: Path, recurse: bool = False, recheck: bool = False,
     resolver = resolver or Resolver()
     cancel = cancel or threading.Event()
 
+    def task(p: Path):
+        # Every file is queued at once, so the cancel check has to happen
+        # here, when a worker picks the file up, or Stop waits for them all.
+        if cancel.is_set():
+            return None
+        # Budget against the file's own folder: with subfolders included
+        # the parent can be deeper than the folder that was chosen.
+        return resolve_one(p, resolver, len(str(p.parent)), template)
+
     resolved = {}
     with ThreadPoolExecutor(max_workers=WORKERS) as pool:
         futures = {}
         for p in todo:
             if cancel.is_set():
                 break
-            # Budget against the file's own folder: with subfolders included
-            # the parent can be deeper than the folder that was chosen.
-            futures[pool.submit(resolve_one, p, resolver, len(str(p.parent)), template)] = p
+            futures[pool.submit(task, p)] = p
         for i, fut in enumerate(as_completed(futures), start=1):
             p = futures[fut]
             try:
-                resolved[p] = fut.result()
+                rec = fut.result()
             except Exception as exc:
-                resolved[p] = Record(path=p, note=f"Unexpected error: {exc}")
+                rec = Record(path=p, note=f"Unexpected error: {exc}")
+            if rec is not None:
+                resolved[p] = rec
             if progress:
                 progress(i, len(futures), p.name)
 
@@ -873,7 +882,10 @@ def apply_records(folder: Path, records: list) -> str:
     for r in pending:
         if not r.proposed.lower().endswith(".pdf"):
             r.proposed += ".pdf"
-        r.proposed = sanitize(r.proposed[:-4], TITLE_CEILING + 20) + ".pdf"
+        # The whole name, not just a title, so the title ceiling does not
+        # apply: only the path limit render_name already respected.
+        room = max(8, PATH_LIMIT - len(str(r.path.parent)) - RESERVE)
+        r.proposed = sanitize(r.proposed[:-4], room, ceiling=room) + ".pdf"
     assign_unique_names(records)
     rename_records(pending)
     return write_log(Path(folder), [r for r in pending if r.outcome in (RENAMED, FAILED)])
