@@ -314,6 +314,36 @@ with tempfile.TemporaryDirectory() as d:          # cancel
     check("cancel before start renames nothing", res.cancelled and res.count(core.RENAMED) == 0
           and (root / "paper1.pdf").exists())
 
+with tempfile.TemporaryDirectory() as d:          # cancel mid run skips queued files
+    root = Path(d)
+    for i in range(40):
+        (root / f"x{i}.pdf").write_bytes(b"x")
+    seen, ev, real = [], threading.Event(), core.resolve_one
+
+    def slow(p, *a, **k):
+        seen.append(p)
+        time.sleep(0.05)
+        return core.Record(path=p)
+    core.resolve_one = slow
+    try:
+        # Progress fires only after every file is queued: Stop pressed mid run.
+        res = core.run_folder(root, cancel=ev, progress=lambda *a: ev.set())
+    finally:
+        core.resolve_one = real
+    check("cancel mid run skips queued lookups", res.cancelled and len(seen) < 40, f"{len(seen)} of 40 looked up")
+
+with tempfile.TemporaryDirectory() as d:          # apply keeps a long approved name
+    root = Path(d)
+    (root / "a.pdf").write_bytes(b"x")
+    long_title = ("Anisotropic mechanical response of additively manufactured titanium lattice "
+                  "scaffolds under compressive loading for load bearing orthopaedic implants")
+    name = core.render_name("2021", long_title, len(str(root)), author="Lim et al",
+                            template="{author}_{year}_{title}")
+    rec = core.Record(path=root / "a.pdf", outcome=core.NEEDS_LOOK, proposed=name)
+    core.apply_records(root, [rec])
+    check("apply keeps the approved name, even past 130 characters",
+          len(name) > 135 and Path(rec.new_path).name == name, f"{name} -> {Path(rec.new_path).name}")
+
 with tempfile.TemporaryDirectory() as d:          # subfolders
     root = Path(d)
     sub = root / "deeper"
